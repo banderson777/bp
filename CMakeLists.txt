@@ -1,3 +1,4 @@
+# Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md.
 project(CFS_BPNODE C)
 
 set(APP_SRC_FILES
@@ -8,10 +9,11 @@ set(APP_SRC_FILES
   fsw/src/bpnode_adu_in.c
   fsw/src/bpnode_cla_in.c
   fsw/src/bpnode_cla_out.c
+  fsw/src/bpnode_video_sink.c
   fsw/src/bpnode_gen_worker.c
   fsw/src/bpnode_notif.c
   fsw/src/bpnode_maint.c
-  
+
   # FWP files
   fsw/fwp/fwp_timep.c
   fsw/fwp/fwp_tablep.c
@@ -41,10 +43,14 @@ set(APP_TABLE_FILES
 
 # Create the app module
 add_cfe_app(bpnode ${APP_SRC_FILES})
+target_sources(bpnode PRIVATE
+  ../integration/bplib_tcp_cla.c
+  ../integration/bplib_tcp_cla_bplib.c)
 
 target_include_directories(bpnode PUBLIC fsw/inc)
 target_include_directories(bpnode PUBLIC fsw/fwp)
 target_include_directories(bpnode PUBLIC fsw/src)
+target_include_directories(bpnode PUBLIC ../integration)
 
 # Include bplib
 add_cfe_app_dependency(bpnode bplib)
@@ -59,3 +65,11 @@ add_cfe_tables(bpnode ${APP_TABLE_FILES})
 if (ENABLE_UNIT_TESTS)
   add_subdirectory(unit-test)
 endif (ENABLE_UNIT_TESTS)
+
+# The lab build explicitly opts into autonomous five-node configuration.
+if (BPNODE_ENABLE_FIVE_NODE_DEMO)
+  target_sources(bpnode PRIVATE fsw/src/bpnode_demo.c)
+  target_include_directories(bpnode PRIVATE ../bplib/bpa/ct/src)
+  target_compile_definitions(bpnode PRIVATE BPNODE_ENABLE_FIVE_NODE_DEMO)
+  target_link_libraries(bpnode ${BPNODE_DEMO_SECURITY_LIBRARY})
+endif()

@@ -1,3 +1,4 @@
+/* Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md. */
 /*
  * NASA Docket No. GSC-19,559-1, and identified as "Delay/Disruption Tolerant Networking 
  * (DTN) Bundle Protocol (BP) v7 Core Flight System (cFS) Application Build 7.0
@@ -53,4 +54,4 @@ BPLib_NC_MibPerNodeConfig_t MIBConfigPNTable = {
 **    3) a brief description of the contents of the a image
 **    4) the desired name of the table image binary file that is cFE compatible
 */
-CFE_TBL_FILEDEF(MIBConfigPNTable, BPNODE.MIBConfigPNTable, MIB per node Table, bpnode_mib_pn.tbl)
+CFE_TBL_FILEDEF(MIBConfigPNTable, BPNODE.MIBCfgPN, MIB per node Table, bpnode_mib_pn.tbl)

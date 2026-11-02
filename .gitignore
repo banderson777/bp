@@ -1,2 +1,6 @@
+# Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md.
 .DS_Store
 .vscode
+
+# Out-of-tree local builds
+/build/

@@ -1,3 +1,4 @@
+/* Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md. */
 /*
  * NASA Docket No. GSC-19,559-1, and identified as "Delay/Disruption Tolerant Networking 
  * (DTN) Bundle Protocol (BP) v7 Core Flight System (cFS) Application Build 7.0
@@ -28,6 +29,9 @@
 */
 
 #include "bpnode_app.h"
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+#include "bpnode_demo.h"
+#endif
 #include "bpnode_cla_out.h"
 
 /*
@@ -258,6 +262,19 @@ int32 BPNode_ClaOut_ProcessBundleOutput(uint32 ContId, size_t *MsgSize)
             case BPLib_EPP_CLA:
                 break;
             case BPLib_TCP_CLA:
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+                Status = BPNode_DemoWire(true, BPNode_AppData.ClaOutData[ContId].OutBuffer.Payload,
+                                         BPNODE_CLA_PSP_OUTPUT_BUFFER_SIZE, MsgSize);
+                if (Status != BPLIB_SUCCESS) break;
+                if (BPNode_DemoDropCcs(BPNode_AppData.ClaOutData[ContId].OutBuffer.Payload, *MsgSize))
+                {
+                    Status = BPLIB_SUCCESS;
+                    break;
+                }
+#endif
+                Status = BPLib_TCPCLA_Send(&BPNode_AppData.ClaInData[ContId].TcpCla,
+                                           BPNode_AppData.ClaOutData[ContId].OutBuffer.Payload,
+                                           *MsgSize, BPNODE_TCPCLA_IO_TIMEOUT_MSEC);
                 break;
             default:
                 break;

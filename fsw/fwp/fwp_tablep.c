@@ -1,3 +1,4 @@
+/* Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md. */
 /*
  * NASA Docket No. GSC-19,559-1, and identified as "Delay/Disruption Tolerant Networking 
  * (DTN) Bundle Protocol (BP) v7 Core Flight System (cFS) Application Build 7.0
@@ -31,6 +32,9 @@
 #include "fwp_tablep.h"
 #include "fwp_adup.h"
 #include "bpnode_app.h"
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+#include "bpnode_demo.h"
+#endif
 
 /* ==================== */
 /* Function Definitions */
@@ -107,7 +111,7 @@ BPLib_Status_t BPA_TABLEP_TableInit(void)
     if (Status == CFE_SUCCESS || Status == CFE_TBL_INFO_UPDATED)
     {
         /* Initialize the NC MIB config per node configuration */
-        Status = BPA_TABLEP_SingleTableInit("MIBConfigPNTable",
+        Status = BPA_TABLEP_SingleTableInit("MIBCfgPN",
                                             MIB_CONFIG_PN_TABLE_FILE,
                                             sizeof(BPLib_NC_MibPerNodeConfig_t),
                                             (CFE_TBL_CallbackFuncPtr_t) BPA_TABLEP_NC_MIBConfigPNTblValidateFunc,
@@ -118,7 +122,7 @@ BPLib_Status_t BPA_TABLEP_TableInit(void)
     if (Status == CFE_SUCCESS || Status == CFE_TBL_INFO_UPDATED)
     {
         /* Initialize the NC MIB config per source configuration */
-        Status = BPA_TABLEP_SingleTableInit("MIBConfigPSTable",
+        Status = BPA_TABLEP_SingleTableInit("MIBCfgPS",
                                             MIB_CONFIG_PS_TABLE_FILE,
                                             sizeof(BPLib_NC_MIBConfigPSTable_t),
                                             (CFE_TBL_CallbackFuncPtr_t) BPA_TABLEP_NC_MIBConfigPSTblValidateFunc,
@@ -175,6 +179,9 @@ BPLib_Status_t BPA_TABLEP_TableInit(void)
         Status = CFE_SUCCESS;
     }
 
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+    if (Status == CFE_SUCCESS) Status = BPNode_DemoConfigure();
+#endif
     return BPA_CFE_Status_Translate(Status);
 }
 
@@ -219,6 +226,12 @@ CFE_Status_t BPA_TABLEP_SingleTableInit(const char* TableName, const char* Table
 
 BPLib_Status_t BPA_TABLEP_TableUpdate(uint8_t TableType, void** TblPtr)
 {
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+    /* Startup lab tables remain fixed for the lifetime of this process. */
+    (void)TableType;
+    (void)TblPtr;
+    return BPLIB_SUCCESS;
+#else
     BPLib_Status_t Status;
 
     Status = BPLIB_ERROR;
@@ -256,13 +269,13 @@ BPLib_Status_t BPA_TABLEP_TableUpdate(uint8_t TableType, void** TblPtr)
 
             break;
         case BPLIB_MIB_PER_NODE:
-            Status = BPA_TABLEP_TableManage("MIBConfigPNTable",
+            Status = BPA_TABLEP_TableManage("MIBCfgPN",
                                             TblPtr,
                                             BPNode_AppData.TableHandles[BPLIB_MIB_PER_NODE]);
 
             break;
         case BPLIB_MIB_PER_SRC:
-            Status = BPA_TABLEP_TableManage("MIBConfigPSTable",
+            Status = BPA_TABLEP_TableManage("MIBCfgPS",
                                             TblPtr,
                                             BPNode_AppData.TableHandles[BPLIB_MIB_PER_SRC]);
 
@@ -300,6 +313,7 @@ BPLib_Status_t BPA_TABLEP_TableUpdate(uint8_t TableType, void** TblPtr)
     }
 
     return Status;
+#endif
 }
 
 BPLib_Status_t BPA_TABLEP_TableManage(const char* TableName, void** TablePtr, CFE_TBL_Handle_t TableHandle)

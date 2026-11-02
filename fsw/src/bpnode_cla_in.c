@@ -1,3 +1,4 @@
+/* Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md. */
 /*
  * NASA Docket No. GSC-19,559-1, and identified as "Delay/Disruption Tolerant Networking 
  * (DTN) Bundle Protocol (BP) v7 Core Flight System (cFS) Application Build 7.0
@@ -27,7 +28,11 @@
 ** Include Files
 */
 #include "bpnode_app.h"
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+#include "bpnode_demo.h"
+#endif
 #include "bpnode_cla_in.h"
+#include "bpnode_video_sink.h"
 
 
 /*
@@ -167,7 +172,7 @@ void BPNode_ClaIn_TaskMain(uint32 ContactId)
         int64_t StartTime = BPLib_TIME_GetMonotonicTime();
         #endif
 
-        while (Status != BPLIB_TIMEOUT &&
+        while (Status == BPLIB_SUCCESS &&
                 (BPNode_AppData.ClaInData[ContactId].BitsIngressed <
                 BPNode_AppData.BplibInst.ContCtxt[ContactId].Config.IngressBitsPerCycle))
         {
@@ -328,6 +333,33 @@ int32 BPNode_ClaIn_ProcessBundleInput(uint32 ContId, size_t *BundleSize)
         case BPLib_EPP_CLA:
             break;
         case BPLib_TCP_CLA:
+            {
+                BPLib_TCPCLA_t *TcpCla = &BPNode_AppData.ClaInData[ContId].TcpCla;
+                size_t ReceivedSize = 0;
+                BpStatus = BPLib_TCPCLA_Receive(TcpCla, BPNode_AppData.ClaInData[ContId].PSP_Buffer,
+                                                sizeof(BPNode_AppData.ClaInData[ContId].PSP_Buffer),
+                                                &ReceivedSize, BPNODE_TCPCLA_IO_TIMEOUT_MSEC);
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+                if (BpStatus == BPLIB_SUCCESS)
+                    BpStatus = BPNode_DemoWire(false, BPNode_AppData.ClaInData[ContId].PSP_Buffer,
+                                              sizeof(BPNode_AppData.ClaInData[ContId].PSP_Buffer), &ReceivedSize);
+#endif
+                if (BpStatus == BPLIB_SUCCESS)
+                {
+                    *BundleSize = ReceivedSize;
+#ifdef BPNODE_VIDEO_SINK_ENABLE
+                    BpStatus = BPNode_VideoSink_Write(&BPNode_AppData.BplibInst,
+                                                      BPNode_AppData.ClaInData[ContId].PSP_Buffer,
+                                                      ReceivedSize);
+#endif
+                }
+                if (BpStatus == BPLIB_SUCCESS)
+                {
+                    BpStatus = BPLib_CLA_Ingress(&BPNode_AppData.BplibInst, ContId,
+                                                BPNode_AppData.ClaInData[ContId].PSP_Buffer,
+                                                ReceivedSize, 0);
+                }
+            }
             break;
         default:
             break;
@@ -406,6 +438,32 @@ BPLib_Status_t BPNode_ClaIn_Setup(uint32 ContactId)
         case BPLib_EPP_CLA:
             break;
         case BPLib_TCP_CLA:
+            {
+                BPLib_CLA_ContactsSet_t *TcpInfo = ContactInfo;
+                BPLib_TCPCLA_t *TcpCla = &BPNode_AppData.ClaInData[ContactId].TcpCla;
+                /* The task/context outlives contact teardown. Reuse its lock so
+                 * a task finishing an old cycle never touches a destroyed lock. */
+                if (BPNode_AppData.ClaInData[ContactId].TcpInitialized)
+                {
+                    BPLib_TCPCLA_Close(TcpCla);
+                    Status = BPLIB_SUCCESS;
+                }
+                else
+                    Status = BPLib_TCPCLA_InitConfig(TcpCla, BPLIB_MAX_BUNDLE_LEN, ContactId,
+                                                 BPNODE_TCPCLA_PROTOCOL(ContactId),
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+                                                 BPNode_DemoNodeEid(),
+#else
+                                                 BPNODE_TCPCLA_NODE_ID,
+#endif
+                                                 BPNODE_TCPCLA_SEGMENT_MRU,
+                                                 BPNODE_TCPCLA_TRANSFER_MRU,
+                                                 BPNODE_TCPCLA_KEEPALIVE_INTERVAL);
+                BPNode_AppData.ClaInData[ContactId].TcpInitialized = (Status == BPLIB_SUCCESS);
+                if (Status == BPLIB_SUCCESS && TcpInfo->ClaOutAddr[0] == '\0' &&
+                    TcpInfo->ClaInAddr[0] == '\0')
+                    Status = BPLIB_INVALID_CONFIG_ERR;
+            }
             break;
         default:
             break;
@@ -465,6 +523,38 @@ BPLib_Status_t BPNode_ClaIn_Start(uint32 ContactId)
         case BPLib_EPP_CLA:
             break;
         case BPLib_TCP_CLA:
+            {
+                BPLib_CLA_ContactsSet_t *TcpInfo =
+                    &BPNode_AppData.ConfigPtrs.ContactsConfigPtr->ContactSet[ContactId];
+                if (TcpInfo->ClaOutAddr[0] != '\0')
+                {
+                    Status = BPLib_TCPCLA_Connect(&BPNode_AppData.ClaInData[ContactId].TcpCla,
+                                                  TcpInfo->ClaOutAddr, TcpInfo->ClaOutPort,
+                                                  BPNODE_TCPCLA_CONNECT_TIMEOUT_MSEC);
+                    if (Status == BPLIB_SUCCESS)
+                    {
+                        if (BPNode_AppData.ClaInData[ContactId].TcpCla.Protocol == BPLib_TCPCLA_TCPCLV4)
+                            Status = BPLib_TCPCLA_SessionStart(&BPNode_AppData.ClaInData[ContactId].TcpCla,
+                                                               true, BPNODE_TCPCLA_CONNECT_TIMEOUT_MSEC);
+                    }
+                }
+                else
+                {
+                    Status = BPLib_TCPCLA_Listen(&BPNode_AppData.ClaInData[ContactId].TcpCla,
+                                                 TcpInfo->ClaInAddr, TcpInfo->ClaInPort, 1);
+                    if (Status == BPLIB_SUCCESS)
+                        Status = BPLib_TCPCLA_Accept(&BPNode_AppData.ClaInData[ContactId].TcpCla,
+                                                     BPNODE_TCPCLA_CONNECT_TIMEOUT_MSEC);
+                    if (Status == BPLIB_SUCCESS)
+                    {
+                        if (BPNode_AppData.ClaInData[ContactId].TcpCla.Protocol == BPLib_TCPCLA_TCPCLV4)
+                            Status = BPLib_TCPCLA_SessionStart(&BPNode_AppData.ClaInData[ContactId].TcpCla,
+                                                               false, BPNODE_TCPCLA_CONNECT_TIMEOUT_MSEC);
+                    }
+                }
+                if (Status != BPLIB_SUCCESS)
+                    BPLib_TCPCLA_Close(&BPNode_AppData.ClaInData[ContactId].TcpCla);
+            }
             break;
         default:
             break;
@@ -531,6 +621,8 @@ BPLib_Status_t BPNode_ClaIn_Stop(uint32 ContactId)
             break;
 
         case BPLib_TCP_CLA:
+            BPLib_TCPCLA_Close(&BPNode_AppData.ClaInData[ContactId].TcpCla);
+            BPNode_VideoSink_Close();
             break;
 
         default:
@@ -543,6 +635,15 @@ BPLib_Status_t BPNode_ClaIn_Stop(uint32 ContactId)
 
 void BPNode_ClaIn_Teardown(uint32 ContactId)
 {
+    if (ContactId < BPLIB_MAX_NUM_CONTACTS &&
+        BPNode_AppData.BplibInst.ContCtxt[ContactId].Config.CLAType == BPLib_TCP_CLA)
+    {
+        if (BPNode_AppData.ClaInData[ContactId].TcpInitialized)
+        {
+            BPLib_TCPCLA_Close(&BPNode_AppData.ClaInData[ContactId].TcpCla);
+        }
+        BPNode_VideoSink_Close();
+    }
+
     return;
 }
-

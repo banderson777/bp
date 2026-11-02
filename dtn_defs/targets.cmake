@@ -1,3 +1,4 @@
+# Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md.
 ######################################################################
 #
 # Master config file for cFS target boards
@@ -121,13 +122,21 @@ foreach (CPU ${CPU_NUMS})
     SET(cpu${CPU}_PLATFORM default)
     SET(cpu${CPU}_APPLIST)  # Nothing extra
 
-    # TODO add custom PSP code
-    SET(cpu${CPU}_PSP_MODULELIST unsock_intf)
-    SET(cpu${CPU}_PSP_MODULELIST udpsock_intf)
+    # The legacy UDP PSP module is POSIX-only.  TCP CLA host builds use
+    # Winsock directly through integration/bplib_socket_compat.h.
+    if (WIN32)
+        SET(cpu${CPU}_PSP_MODULELIST)
+    else()
+        SET(cpu${CPU}_PSP_MODULELIST udpsock_intf)
+    endif()
 
     SET(cpu${CPU}_FILELIST cfe_es_startup.scr)
 
-    SET(cpu${CPU}_SYSTEM toolchain-i686-linux-gnu.cmake)
+    if (WIN32)
+        SET(cpu${CPU}_SYSTEM native)
+    else()
+        SET(cpu${CPU}_SYSTEM toolchain-i686-linux-gnu.cmake)
+    endif()
 
 endforeach()
 

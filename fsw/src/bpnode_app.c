@@ -1,3 +1,4 @@
+/* Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md. */
 /*
  * NASA Docket No. GSC-19,559-1, and identified as "Delay/Disruption Tolerant Networking 
  * (DTN) Bundle Protocol (BP) v7 Core Flight System (cFS) Application Build 7.0
@@ -28,6 +29,9 @@
 */
 
 #include "bpnode_app.h"
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+#include "bpnode_demo.h"
+#endif
 #include "bpnode_eventids.h"
 #include "bpnode_tbl.h"
 #include "bpnode_version.h"
@@ -61,6 +65,9 @@ void BPNode_AppMain(void)
     ** CFE_ES_RunStatus_APP_ERROR and the app will not enter the run loop
     */
     Status = BPNode_AppInit();
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+    if (Status == CFE_SUCCESS) Status = BPNode_DemoStart();
+#endif
     if (Status != CFE_SUCCESS)
     {
         BPNode_AppData.RunStatus = CFE_ES_RunStatus_APP_ERROR;
@@ -141,6 +148,9 @@ CFE_Status_t BPNode_WakeupProcess(void)
         Status = CFE_SUCCESS;
     }
 
+#ifdef BPNODE_ENABLE_FIVE_NODE_DEMO
+    BPNode_DemoTick();
+#endif
     /* Tell child tasks to start processing */
     BPNode_NotifSet(&BPNode_AppData.ChildStartWorkNotif);
 

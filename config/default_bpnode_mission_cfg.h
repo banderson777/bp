@@ -1,3 +1,4 @@
+/* Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md. */
 /*
  * NASA Docket No. GSC-19,559-1, and identified as "Delay/Disruption Tolerant Networking 
  * (DTN) Bundle Protocol (BP) v7 Core Flight System (cFS) Application Build 7.0
@@ -49,6 +50,34 @@
  * \brief IODriver udpsock_intf driver name
  */
 #define BPNODE_CLA_PSP_DRIVER_NAME "udpsock_intf"
+
+/** TCPCLv4 defaults; missions should override the node ID and MRUs. */
+#define BPNODE_TCPCLA_NODE_ID              "ipn:1.0"
+#define BPNODE_TCPCLA_SEGMENT_MRU          (16384u)
+#define BPNODE_TCPCLA_TRANSFER_MRU         (BPLIB_MAX_BUNDLE_LEN)
+#define BPNODE_TCPCLA_KEEPALIVE_INTERVAL   (0u)
+#define BPNODE_TCPCLA_CONNECT_TIMEOUT_MSEC (5000u)
+
+/* A TCP frame/ACK can span task wakeups. Do not use the queue polling budget. */
+#ifndef BPNODE_TCPCLA_IO_TIMEOUT_MSEC
+#define BPNODE_TCPCLA_IO_TIMEOUT_MSEC      (1000u)
+#endif
+
+/* MOC-only payload sink. Define BPNODE_VIDEO_SINK_ENABLE in the MOC mission
+ * override; leave it undefined on moon, relay, and ground nodes. */
+#ifndef BPNODE_VIDEO_SINK_PATH
+#define BPNODE_VIDEO_SINK_PATH             "/cf/moc-video.bin"
+#endif
+
+/**
+ * Select the stream protocol independently for each TCP contact.  Missions
+ * may override this with a function-like macro, for example:
+ *   #define BPNODE_TCPCLA_PROTOCOL(ContactId) \\
+ *       ((ContactId) == 1 ? BPLib_TCPCLA_STCP : BPLib_TCPCLA_TCPCLV4)
+ */
+#ifndef BPNODE_TCPCLA_PROTOCOL
+#define BPNODE_TCPCLA_PROTOCOL(ContactId) (BPLib_TCPCLA_TCPCLV4)
+#endif
 
 /**
  * \brief Default EID Service Number to egress bundles over channel 0

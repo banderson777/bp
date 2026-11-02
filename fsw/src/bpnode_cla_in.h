@@ -1,3 +1,4 @@
+/* Local integration modifications (banderson777, 2026); see LOCAL_CHANGES.md. */
 /*
  * NASA Docket No. GSC-19,559-1, and identified as "Delay/Disruption Tolerant Networking 
  * (DTN) Bundle Protocol (BP) v7 Core Flight System (cFS) Application Build 7.0
@@ -34,6 +35,7 @@
 #include "bplib.h"
 #include "bpnode_platform_cfg.h"
 #include "bpnode_task.h"
+#include "bplib_tcp_cla.h"
 
 #ifdef DEFAULT_UDP_CLA
 #include "iodriver_base.h"
@@ -75,6 +77,10 @@ typedef struct
     void* SB_Buffer;
 
     bool   ClearPipe;
+
+    /* TCPCLv4 uses one bidirectional stream per contact. */
+    BPLib_TCPCLA_t TcpCla;
+    bool TcpInitialized;
     
 } BPNode_ClaInData_t;
 
