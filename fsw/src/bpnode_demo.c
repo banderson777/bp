@@ -1,3 +1,11 @@
+/* Native five-node video demo. Queue records start with a four-byte tag and
+ * a 16-byte session ID, followed by big-endian 32-bit fields:
+ * BPD1: segment, part, part count, total segments (0 while streaming),
+ *       payload length, then payload bytes.
+ * BPE1: final segment count, 0, 0, final segment count, 0.
+ * BPE2: one-based video number, first segment, segment count.
+ * BPF1: one-based video number; consumed locally at node 1.
+ * Segment and part indices start at zero. Only BPF1 bypasses BPLib ingress. */
 #define _GNU_SOURCE
 #include "bpnode_demo.h"
 #include "bplib_bsl_security.h"
@@ -299,6 +307,8 @@ CFE_Status_t BPNode_DemoStart(void)
     }
     return status;
 }
+/* Feed a bounded batch of numbered ADUs on each source scheduler tick.
+ * On failure, keep the current index so the next tick can retry it. */
 void BPNode_DemoTick(void)
 {
     if (node != 1 || feed_done) return;
@@ -321,6 +331,8 @@ void BPNode_DemoTick(void)
         {
             if (errno == ENOENT)
             {
+                /* A gap ends a finite queue. A streaming producer may still
+                 * be preparing the next record unless it has published EOF. */
                 if (access("input/stream", F_OK) || !access("input/eof", F_OK))
                 {
                     feed_done = true;
@@ -333,6 +345,8 @@ void BPNode_DemoTick(void)
         if (read_file(path, data, sizeof(data), &length)) return;
         if (length == 24 && !memcmp(data, "BPF1", 4))
         {
+            /* Acknowledge acceptance by node 1, not custody or delivery.
+             * Publish the acknowledgement before advancing the queue index. */
             uint32_t file_number = get32(data + 20);
             if (memcmp(data + 4, session, 16) || file_number != acknowledged_files + 1)
             {
@@ -416,6 +430,10 @@ static int persist_segment(uint32_t seg, uint32_t count, uint32_t segments,
     return result;
 }
 
+/* With file_lock held, concatenate a contiguous published segment range.
+ * Publish a new archive by rename after syncing the temporary file. On replay,
+ * compare the existing archive without rewriting it and retry the directory sync.
+ * Return -1 if any segment is unavailable or any validation or I/O fails. */
 static int archive_video(uint32_t file_number, uint32_t first_segment, uint32_t count)
 {
     char output[128];
@@ -473,8 +491,10 @@ static int archive_video(uint32_t file_number, uint32_t first_segment, uint32_t 
     return result;
 }
 
-/* Files contain the authenticated complete chunk record, retained for replay.
- * A successful return means receipts and any completed output have been synced. */
+/* Accept one authenticated, borrowed ADU while file_lock is held.
+ * Retain data records for replay and sync any completed output before returning
+ * success. An archive request can fail until its segments arrive; run EOF validates
+ * every declared segment before publishing completion, including an empty run. */
 static int deliver(const uint8_t *data, size_t length)
 {
     if (length < 20 || memcmp(data + 4, session, 16)) return -1;
