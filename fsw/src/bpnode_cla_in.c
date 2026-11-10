@@ -368,6 +368,7 @@ int32 BPNode_ClaIn_ProcessBundleInput(uint32 ContId, size_t *BundleSize)
     return BpStatus;
 }
 
+/** Prepare the configured per-contact ingress transport and return its setup status to BPLib. */
 BPLib_Status_t BPNode_ClaIn_Setup(uint32 ContactId)
 {
     BPLib_Status_t           Status;
@@ -472,6 +473,7 @@ BPLib_Status_t BPNode_ClaIn_Setup(uint32 ContactId)
     return Status;
 }
 
+/** Activate the prepared transport and start the ingress child task for this contact. */
 BPLib_Status_t BPNode_ClaIn_Start(uint32 ContactId)
 {
     int32            PspStatus;
@@ -563,6 +565,7 @@ BPLib_Status_t BPNode_ClaIn_Start(uint32 ContactId)
     return Status;
 }
 
+/** Stop per-contact ingress and release running transport or task state before teardown. */
 BPLib_Status_t BPNode_ClaIn_Stop(uint32 ContactId)
 {
     BPLib_Status_t   Status;
@@ -633,6 +636,7 @@ BPLib_Status_t BPNode_ClaIn_Stop(uint32 ContactId)
     return Status;
 }
 
+/** Release ingress resources associated with this contact after it stops. */
 void BPNode_ClaIn_Teardown(uint32 ContactId)
 {
     if (ContactId < BPLIB_MAX_NUM_CONTACTS &&

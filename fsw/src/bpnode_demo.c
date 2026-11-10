@@ -35,6 +35,7 @@ static bool tampered_ciphertext;
 
 static uint32_t get32(const uint8_t *p);
 
+/** Construct a zero-authority IPN EID for the requested demo node and service. */
 static BPLib_EID_t eid(unsigned number, unsigned service)
 {
     BPLib_EID_t value = {0};
@@ -43,6 +44,7 @@ static BPLib_EID_t eid(unsigned number, unsigned service)
     value.Node = number; value.Service = service;
     return value;
 }
+/** Build an inclusive IPN node and service range for contact routing. */
 static BPLib_EID_Pattern_t pattern(unsigned low, unsigned high, unsigned min_service, unsigned max_service)
 {
     BPLib_EID_Pattern_t value = {0};
@@ -52,6 +54,8 @@ static BPLib_EID_Pattern_t pattern(unsigned low, unsigned high, unsigned min_ser
     value.MinService = min_service; value.MaxService = max_service;
     return value;
 }
+/** Read one complete file into bounded caller storage and report its length. Reject overflow,
+ * read errors, and failed close. */
 static int read_file(const char *path, void *buffer, size_t capacity, size_t *length)
 {
     FILE *file = fopen(path, "rb");
@@ -63,6 +67,8 @@ static int read_file(const char *path, void *buffer, size_t capacity, size_t *le
     if (fclose(file)) result = -1;
     return result;
 }
+/** Sync a directory entry update and close its descriptor; return an error if either step
+ * fails. */
 static int sync_dir(const char *path)
 {
     int fd = open(path, O_RDONLY | O_DIRECTORY);
@@ -71,6 +77,8 @@ static int sync_dir(const char *path)
     if (close(fd)) result = -1;
     return result;
 }
+/** Write and sync a temporary sibling, rename it into place, then sync the containing
+ * directory. Callers serialize updates to a given path. */
 static int write_file(const char *path, const void *data, size_t length, const char *directory)
 {
     char temporary[256];
@@ -84,6 +92,8 @@ static int write_file(const char *path, const void *data, size_t length, const c
     return result;
 }
 
+/** Durably advance the source sequence counter before returning a new custody ID; fail rather
+ * than wrapping. */
 static BPLib_Status_t allocate_sequence(uint64_t *id)
 {
     uint8_t encoded[8];
@@ -98,6 +108,8 @@ static BPLib_Status_t allocate_sequence(uint64_t *id)
     return BPLIB_SUCCESS;
 }
 
+/** Restore the sequence counter and rebuild in-memory custody tracking from persisted rows
+ * before link workers start. */
 static int recover_custody(void)
 {
     BPLib_Instance_t *instance = &BPNode_AppData.BplibInst;
@@ -133,6 +145,8 @@ static int recover_custody(void)
     return 0;
 }
 
+/** Read the node identity and demo environment, set topology and endpoint configuration, and
+ * reject an invalid runtime before startup. */
 CFE_Status_t BPNode_DemoConfigure(void)
 {
     const char *value = getenv("BPNODE_DEMO_NODE");
@@ -231,8 +245,11 @@ CFE_Status_t BPNode_DemoConfigure(void)
         printf("DEMO node=%u one-shot CCS drop hook enabled\n", node);
     return CFE_SUCCESS;
 }
+/** Return a borrowed process-local string for the configured node's EID. */
 const char *BPNode_DemoNodeEid(void) { return node_eid; }
 
+/** Drive one configured neighbor contact and its bidirectional bundle queues from a cFS child
+ * task. */
 static void link_loop(unsigned contact)
 {
     BPLib_Instance_t *instance = &BPNode_AppData.BplibInst;
@@ -282,8 +299,12 @@ failed:
     fprintf(stderr, "DEMO node=%u contact=%u setup failed\n", node, contact);
     CFE_ES_ExitChildTask();
 }
+/** Run the link worker for contact slot zero through the cFS no-argument task entry point. */
 static void link_zero(void) { link_loop(0); }
+/** Run the link worker for contact slot one through the cFS no-argument task entry point. */
 static void link_one(void) { link_loop(1); }
+/** Prepare runtime directories, recover stored custody, and start the link workers after
+ * application configuration. */
 CFE_Status_t BPNode_DemoStart(void)
 {
     if (mkdir("receipts", 0700) && errno != EEXIST) return CFE_ES_BAD_ARGUMENT;
@@ -369,6 +390,7 @@ void BPNode_DemoTick(void)
     }
 }
 
+/** Decode one unsigned big-endian field from a validated queue record. */
 static uint32_t get32(const uint8_t *p)
 { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
 
@@ -553,6 +575,9 @@ static int deliver(const uint8_t *data, size_t length)
     return persist_segment(seg, count, segments, previous, sizeof(previous), false);
 }
 
+/** Protect outgoing node-1 data or authenticate and persist incoming node-5 data.
+ * Administrative bundles and relay traffic pass through; return failure without publishing the
+ * transformed buffer. */
 BPLib_Status_t BPNode_DemoWire(bool outgoing, void *data, size_t capacity, size_t *size)
 {
     if ((outgoing && node != 1) || (!outgoing && node != 5)) return BPLIB_SUCCESS;
@@ -631,6 +656,8 @@ BPLib_Status_t BPNode_DemoWire(bool outgoing, void *data, size_t capacity, size_
     return BPLIB_SUCCESS;
 }
 
+/** Report whether the configured fault injection should suppress this custody signal after
+ * decoding it. */
 bool BPNode_DemoDropCcs(const void *data, size_t size)
 {
     const char *hold_until = getenv("BPNODE_DEMO_HOLD_CCS_UNTIL");

@@ -15,6 +15,8 @@
 static osal_id_t VideoFile = OS_OBJECT_ID_UNDEFINED;
 static pthread_mutex_t VideoLock = PTHREAD_MUTEX_INITIALIZER;
 
+/** Open the sink lazily and seek to the end to preserve previously written bytes.
+ * Caller holds VideoLock. Reset the handle if seeking fails. */
 static BPLib_Status_t open_sink(void)
 {
     int32 status;
@@ -32,6 +34,9 @@ static BPLib_Status_t open_sink(void)
     return status == OS_SUCCESS ? BPLIB_SUCCESS : BPLIB_CLA_IO_ERROR;
 }
 
+/** Decode one borrowed wire bundle and append its payload while holding VideoLock.
+ * Complete short writes before reading another chunk. A write failure can leave
+ * an already-written prefix in the file; the function does not roll it back. */
 BPLib_Status_t BPNode_VideoSink_Write(BPLib_Instance_t *inst,
                                       const void *bundle_data, size_t bundle_size)
 {
@@ -79,6 +84,7 @@ done:
     return status;
 }
 
+/** Serialize shutdown with writers and release the open handle if present. */
 void BPNode_VideoSink_Close(void)
 {
     pthread_mutex_lock(&VideoLock);
@@ -92,6 +98,7 @@ void BPNode_VideoSink_Close(void)
 
 #else
 
+/** Disabled builds accept and ignore sink writes without opening a file. */
 BPLib_Status_t BPNode_VideoSink_Write(BPLib_Instance_t *inst,
                                       const void *bundle_data, size_t bundle_size)
 {
@@ -99,6 +106,7 @@ BPLib_Status_t BPNode_VideoSink_Write(BPLib_Instance_t *inst,
     return BPLIB_SUCCESS;
 }
 
+/** Disabled builds have no sink handle to release. */
 void BPNode_VideoSink_Close(void) {}
 
 #endif
