@@ -14,6 +14,7 @@ static unsigned node;
 static char node_eid[32];
 static uint8_t session[16];
 static uint32_t next_record;
+static uint32_t acknowledged_files;
 static bool feed_done;
 static pthread_mutex_t file_lock = PTHREAD_MUTEX_INITIALIZER;
 static CFE_ES_TaskId_t link_tasks[2];
@@ -23,6 +24,8 @@ static unsigned feed_delay_ms;
 static uint64_t next_feed_ms;
 static bool dropped_ccs;
 static bool tampered_ciphertext;
+
+static uint32_t get32(const uint8_t *p);
 
 static BPLib_EID_t eid(unsigned number, unsigned service)
 {
@@ -316,11 +319,32 @@ void BPNode_DemoTick(void)
         snprintf(path, sizeof(path), "input/%08u.adu", next_record);
         if (access(path, F_OK))
         {
-            if (errno == ENOENT) { feed_done = true; printf("DEMO source queued %u records\n", next_record); }
+            if (errno == ENOENT)
+            {
+                if (access("input/stream", F_OK) || !access("input/eof", F_OK))
+                {
+                    feed_done = true;
+                    printf("DEMO source queued %u records\n", next_record);
+                }
+            }
             else fprintf(stderr, "DEMO source input access failed\n");
             return;
         }
         if (read_file(path, data, sizeof(data), &length)) return;
+        if (length == 24 && !memcmp(data, "BPF1", 4))
+        {
+            uint32_t file_number = get32(data + 20);
+            if (memcmp(data + 4, session, 16) || file_number != acknowledged_files + 1)
+            {
+                fprintf(stderr, "DEMO source file marker invalid at record=%u\n", next_record);
+                return;
+            }
+            if (write_file("input/file-ack", data + 20, 4, "input")) return;
+            acknowledged_files = file_number;
+            next_record++;
+            printf("DEMO source accepted file=%u\n", file_number);
+            continue;
+        }
         BPLib_Status_t ingress_status = BPLib_PI_Ingress(&BPNode_AppData.BplibInst, 0, data, length);
         if (ingress_status != BPLIB_SUCCESS)
         {
@@ -367,7 +391,8 @@ static int persist_segment(uint32_t seg, uint32_t count, uint32_t segments,
         if (read_file(path, previous, capacity, &previous_length) || previous_length < 40 ||
             memcmp(previous, "BPD1", 4) || memcmp(previous + 4, session, 16) ||
             get32(previous + 20) != seg || get32(previous + 24) != i ||
-            get32(previous + 28) != count || get32(previous + 32) != segments ||
+            get32(previous + 28) != count ||
+            (get32(previous + 32) != segments && get32(previous + 32) != 0) ||
             get32(previous + 36) != previous_length - 40) result = -1;
         else if (published)
         {
@@ -391,14 +416,77 @@ static int persist_segment(uint32_t seg, uint32_t count, uint32_t segments,
     return result;
 }
 
+static int archive_video(uint32_t file_number, uint32_t first_segment, uint32_t count)
+{
+    char output[128];
+    char temporary[sizeof(output) + sizeof(".tmp") - 1];
+    uint8_t buffer[8192];
+    if (!file_number || !count || first_segment >= 100000 || count > 100000 - first_segment) return -1;
+    if (mkdir("output", 0700) && errno != EEXIST) return -1;
+    if (mkdir("output/videos", 0700) && errno != EEXIST) return -1;
+    if (sync_dir("output")) return -1;
+    snprintf(output, sizeof(output), "output/videos/video-%06u.ts", file_number);
+    snprintf(temporary, sizeof(temporary), "%s.tmp", output);
+
+    FILE *archive = fopen(output, "rb");
+    bool published = archive != NULL;
+    if (!published)
+    {
+        if (errno != ENOENT) return -1;
+        archive = fopen(temporary, "wb");
+    }
+    if (!archive) return -1;
+
+    int result = 0;
+    for (uint32_t index = 0; index < count && !result; ++index)
+    {
+        char segment_path[128];
+        snprintf(segment_path, sizeof(segment_path), "output/ground-%06u.ts", first_segment + index);
+        FILE *segment = fopen(segment_path, "rb");
+        if (!segment)
+        {
+            result = -1;
+            break;
+        }
+        size_t length;
+        while (!result && (length = fread(buffer, 1, sizeof(buffer), segment)) > 0)
+        {
+            if (published)
+            {
+                for (size_t offset = 0; offset < length; ++offset)
+                    if (fgetc(archive) != buffer[offset]) { result = -1; break; }
+            }
+            else if (fwrite(buffer, 1, length, archive) != length) result = -1;
+        }
+        if (ferror(segment)) result = -1;
+        if (fclose(segment)) result = -1;
+    }
+    if (published)
+    {
+        if (fgetc(archive) != EOF || ferror(archive)) result = -1;
+    }
+    else if (fflush(archive) || fsync(fileno(archive))) result = -1;
+    if (fclose(archive)) result = -1;
+    if (!published && !result && rename(temporary, output)) result = -1;
+    if (!result) result = sync_dir("output/videos");
+    if (!published && !result) printf("DEMO video=%u archived segments=%u\n", file_number, count);
+    return result;
+}
+
 /* Files contain the authenticated complete chunk record, retained for replay.
  * A successful return means receipts and any completed output have been synced. */
 static int deliver(const uint8_t *data, size_t length)
 {
-    if (length < 40 || memcmp(data + 4, session, 16)) return -1;
+    if (length < 20 || memcmp(data + 4, session, 16)) return -1;
+    if (!memcmp(data, "BPE2", 4))
+    {
+        if (length != 32 || archive_video(get32(data + 20), get32(data + 24), get32(data + 28))) return -1;
+        return 0;
+    }
+    if (length < 40) return -1;
     uint32_t seg = get32(data + 20), part = get32(data + 24), count = get32(data + 28);
     uint32_t segments = get32(data + 32), bytes = get32(data + 36);
-    if (bytes != length - 40 || !segments || segments > 100000) return -1;
+    if (bytes != length - 40 || segments > 100000) return -1;
     char path[128];
     uint8_t previous[8192]; size_t previous_length;
     if (!memcmp(data, "BPE1", 4))
@@ -413,7 +501,8 @@ static int deliver(const uint8_t *data, size_t length)
             if (read_file(path, previous, sizeof(previous), &previous_length) || previous_length < 40 ||
                 memcmp(previous, "BPD1", 4) || memcmp(previous + 4, session, 16) ||
                 get32(previous + 20) != i || get32(previous + 24) != 0 ||
-                get32(previous + 32) != segments || get32(previous + 36) != previous_length - 40)
+                (get32(previous + 32) != segments && get32(previous + 32) != 0) ||
+                get32(previous + 36) != previous_length - 40)
                 return -1;
             uint32_t parts = get32(previous + 28);
             if (!parts || parts > 65536 ||
@@ -430,7 +519,8 @@ static int deliver(const uint8_t *data, size_t length)
         printf("DEMO complete: %u authenticated segments persisted\n", segments);
         return 0;
     }
-    if (memcmp(data, "BPD1", 4) || seg >= segments || !count || count > 65536 || part >= count) return -1;
+    if (memcmp(data, "BPD1", 4) || seg >= 100000 || (segments && seg >= segments) ||
+        !count || count > 65536 || part >= count) return -1;
     snprintf(path, sizeof(path), "receipts/%06u-%05u.adu", seg, part);
     if (!access(path, F_OK))
     {
