@@ -328,6 +328,15 @@ CFE_Status_t BPNode_DemoStart(void)
     }
     return status;
 }
+/** Confirm a previously observed queue gap after checking producer closure.
+ * A producer may publish the final ADU and EOF between scheduler probes. */
+static bool final_queue_gap(const char *path)
+{
+    bool closed = access("input/stream", F_OK) == -1 && errno == ENOENT;
+    if (!closed) closed = access("input/eof", F_OK) == 0;
+    return closed && access(path, F_OK) == -1 && errno == ENOENT;
+}
+
 /* Feed a bounded batch of numbered ADUs on each source scheduler tick.
  * On failure, keep the current index so the next tick can retry it. */
 void BPNode_DemoTick(void)
@@ -354,7 +363,7 @@ void BPNode_DemoTick(void)
             {
                 /* A gap ends a finite queue. A streaming producer may still
                  * be preparing the next record unless it has published EOF. */
-                if (access("input/stream", F_OK) || !access("input/eof", F_OK))
+                if (final_queue_gap(path))
                 {
                     feed_done = true;
                     printf("DEMO source queued %u records\n", next_record);
