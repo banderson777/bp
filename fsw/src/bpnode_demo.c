@@ -153,13 +153,19 @@ CFE_Status_t BPNode_DemoConfigure(void)
     if (!value || strlen(value) != 1 || value[0] < '1' || value[0] > '5') return CFE_ES_BAD_ARGUMENT;
     node = (unsigned)(value[0] - '0');
     snprintf(node_eid, sizeof(node_eid), "ipn:%u.0", node * 10);
+    const char *integrity_path = getenv("BPNODE_DEMO_BIB_KEY_FILE");
     size_t length;
     if (read_file("session", session, sizeof(session), &length) || length != sizeof(session)) return CFE_ES_BAD_ARGUMENT;
     if (node == 1 || node == 5)
     {
         uint8_t key[32];
         if (read_file("video.key", key, sizeof(key), &length) || length != sizeof(key)) return CFE_ES_BAD_ARGUMENT;
-        int status = BPLib_BSL_SecurityInit(key);
+        uint8_t integrity_key[64] = {0};
+        int status = 0;
+        if (integrity_path && (read_file(integrity_path, integrity_key, sizeof(integrity_key), &length) ||
+            length != sizeof(integrity_key))) status = -1;
+        if (!status) status = BPLib_BSL_SecurityInitWithIntegrity(key, integrity_path ? integrity_key : NULL);
+        memset(integrity_key, 0, sizeof(integrity_key));
         memset(key, 0, sizeof(key));
         if (status) return CFE_ES_BAD_ARGUMENT;
     }
@@ -176,6 +182,13 @@ CFE_Status_t BPNode_DemoConfigure(void)
     channel->DestEID = eid(50, 1);
     channel->ReportToEID = eid(10, 0);
     channel->CustodyTransferBlkConfig.IncludeBlock = true;
+    if (node == 1 && integrity_path)
+    {
+        /* Reserve three of the lab's five extension slots for BPSec.
+         * Keep Bundle Age and the custody transfer block on the wire. */
+        channel->PrevNodeBlkConfig.IncludeBlock = false;
+        channel->HopCountBlkConfig.IncludeBlock = false;
+    }
     channel->AduWrapping = true;
     channel->AduUnwrapping = false;
     channel->Lifetime = 3600000;
